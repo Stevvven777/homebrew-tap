@@ -1,0 +1,71 @@
+name: Update Markview
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Stable upstream tag (leave empty for latest)
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-markview
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_REPOSITORY: szdytom/markview
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Read the published stable release
+        run: |
+          endpoint="repos/$RELEASE_REPOSITORY/releases/latest"
+          if [[ -n "$RELEASE_TAG" ]]; then
+            [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            endpoint="repos/$RELEASE_REPOSITORY/releases/tags/$RELEASE_TAG"
+          fi
+          gh api "$endpoint" > "$RUNNER_TEMP/release.json"
+          jq -e '.draft == false and .prerelease == false' "$RUNNER_TEMP/release.json"
+          tag=$(jq -r '.tag_name' "$RUNNER_TEMP/release.json")
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          gh release download "$tag" --repo "$RELEASE_REPOSITORY" \
+            --pattern "markview-${tag#v}-aarch64.app.zip" --dir "$RUNNER_TEMP/application"
+      - name: Read the current Cask
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/contents/Casks/markview.rb" > "$RUNNER_TEMP/cask.json"
+          jq -r '.content' "$RUNNER_TEMP/cask.json" | base64 --decode > "$RUNNER_TEMP/markview.rb"
+      - name: Verify and prepare the update
+        id: update
+        run: |
+          python3 update.py --repository "$RELEASE_REPOSITORY" \
+            --release "$RUNNER_TEMP/release.json" --archive "$RUNNER_TEMP"/application/*.app.zip \
+            --cask "$RUNNER_TEMP/markview.rb" --output "$RUNNER_TEMP/updated.rb" >> "$GITHUB_OUTPUT"
+      - name: Update the Cask
+        if: steps.update.outputs.changed == 'true'
+        env:
+          PACKAGE_VERSION: ${{ steps.update.outputs.version }}
+        run: |
+          jq -n --arg sha "$(jq -r '.sha' "$RUNNER_TEMP/cask.json")" \
+            --arg message "chore: update markview to $PACKAGE_VERSION" \
+            --rawfile content "$RUNNER_TEMP/updated.rb" \
+            '{message: $message, sha: $sha, content: ($content | @base64)}' > "$RUNNER_TEMP/update.json"
+          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/Casks/markview.rb" \
+            --input "$RUNNER_TEMP/update.json" --silent
+      - name: Record the result
+        env:
+          PACKAGE_VERSION: ${{ steps.update.outputs.version }}
+          CASK_CHANGED: ${{ steps.update.outputs.changed }}
+        run: |
+          printf 'Upstream version: %s; Cask changed: %s\n' \
+            "$PACKAGE_VERSION" "$CASK_CHANGED" >> "$GITHUB_STEP_SUMMARY"
