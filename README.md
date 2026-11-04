@@ -17,6 +17,11 @@ These commands do not need `sudo`. Normal uninstall preserves settings, styles,
 and downloaded fonts. The fully qualified installation trusts only this Cask
 rather than the entire tap; see Homebrew's [Tap Trust](https://docs.brew.sh/Tap-Trust).
 
+The Cask asks a running Markview to quit during upgrades and reinstalls, so
+reopening the application uses the newly installed executable. If Markview was
+installed before this quit action was added, quit it with Cmd+Q before the next
+upgrade: Homebrew uses the previous installation's uninstall instructions.
+
 ## Existing manual installations
 
 Quit Markview before migrating. Homebrew's `--adopt` can take ownership of an

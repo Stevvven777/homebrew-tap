@@ -12,6 +12,8 @@ cask "markview" do
 
   app "Markview.app"
 
+  uninstall quit: "com.github.szdytom.markview"
+
   caveats <<~EOS
     Markview is ad-hoc signed and is not notarized by Apple.
     If macOS blocks it, review the app in System Settings > Privacy & Security
